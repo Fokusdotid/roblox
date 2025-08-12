@@ -1,10 +1,10 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-	Name = "Mt Daun by Fokus ID",
+	Name = "Mount Daun by Fokus ID",
 	Icon = 0,
 	LoadingTitle = "Mount Daun",
-	LoadingSubtitle = "by Fokus ID",
+	LoadingSubtitle = "By Fokus ID",
 	Theme = "Default",
 	
 	DisableRayfieldPrompts = false,
@@ -118,88 +118,68 @@ local Clip = Tab:CreateToggle({
 local Tab2 = Window:CreateTab("Teleport")
 local Section2 = Tab2:CreateSection("- 3xplo Yang Tersedia -")
 
-local TP = Tab2:CreateToggle({
+local TP = Tab2:CreateButton({
 	Name = "Teleport to Camp 1",
-	CurrentValue = false,
-	Flag = "Toggle1",
-	Callback = function(Value)
-		if Value then
-			local player = game.Players.LocalPlayer
-			local character = player.Character or player.CharacterAdded:Wait()
-			local hrp = character:WaitForChild("HumanoidRootPart")
+	Callback = function()
+		local player = game.Players.LocalPlayer
+		local character = player.Character or player.CharacterAdded:Wait()
+		local hrp = character:WaitForChild("HumanoidRootPart")
+		
+		local targetPosition = CFrame.new(-623, 249, -380)
 			
-			local targetPosition = CFrame.new(-623, 249, -380)
-			
-			hrp.CFrame = targetPosition
-		end
+		hrp.CFrame = targetPosition
 	end
 })
 
-local TP2 = Tab2:CreateToggle({
+local TP2 = Tab2:CreateButton({
 	Name = "Teleport to Camp 2",
-	CurrentValue = false,
-	Flag = "Toggle1",
-	Callback = function(Value)
-		if Value then
-			local player = game.Players.LocalPlayer
-			local character = player.Character or player.CharacterAdded:Wait()
-			local hrp = character:WaitForChild("HumanoidRootPart")
-			
-			local targetPosition = CFrame.new(-1202, 261, -485)
-			
-			hrp.CFrame = targetPosition
-		end
+	Callback = function()
+		local player = game.Players.LocalPlayer
+		local character = player.Character or player.CharacterAdded:Wait()
+		local hrp = character:WaitForChild("HumanoidRootPart")
+		
+		local targetPosition = CFrame.new(-1202, 261, -485)
+	
+		hrp.CFrame = targetPosition
 	end
 })
 
-local TP3 = Tab2:CreateToggle({
+local TP3 = Tab2:CreateButton({
 	Name = "Teleport to Camp 3",
-	CurrentValue = false,
-	Flag = "Toggle1",
-	Callback = function(Value)
-		if Value then
-			local player = game.Players.LocalPlayer
-			local character = player.Character or player.CharacterAdded:Wait()
-			local hrp = character:WaitForChild("HumanoidRootPart")
-			
-			local targetPosition = CFrame.new(-1399, 578, -950)
-			
-			hrp.CFrame = targetPosition
-		end
+	Callback = function()
+		local player = game.Players.LocalPlayer
+		local character = player.Character or player.CharacterAdded:Wait()
+		local hrp = character:WaitForChild("HumanoidRootPart")
+		
+		local targetPosition = CFrame.new(-1399, 578, -950)
+		
+		hrp.CFrame = targetPosition
 	end
 })
 
-local TP4 = Tab2:CreateToggle({
+local TP4 = Tab2:CreateButton({
 	Name = "Teleport to Camp 4",
-	CurrentValue = false,
-	Flag = "Toggle1",
-	Callback = function(Value)
-		if Value then
-			local player = game.Players.LocalPlayer
-			local character = player.Character or player.CharacterAdded:Wait()
-			local hrp = character:WaitForChild("HumanoidRootPart")
-			
-			local targetPosition = CFrame.new(-1700, 816, -1398)
-			
-			hrp.CFrame = targetPosition
-		end
+	Callback = function()
+		local player = game.Players.LocalPlayer
+		local character = player.Character or player.CharacterAdded:Wait()
+		local hrp = character:WaitForChild("HumanoidRootPart")
+		
+		local targetPosition = CFrame.new(-1700, 816, -1398)
+		
+		hrp.CFrame = targetPosition
 	end
 })
 
-local Summit = Tab2:CreateToggle({
+local Summit = Tab2:CreateButton({
 	Name = "Teleport to Summit",
-	CurrentValue = false,
-	Flag = "Toggle1",
-	Callback = function(Value)
-		if Value then
-			local player = game.Players.LocalPlayer
-			local character = player.Character or player.CharacterAdded:Wait()
-			local hrp = character:WaitForChild("HumanoidRootPart")
-			
-			local targetPosition = CFrame.new(-3242, 1716, -2583)
-			
-			hrp.CFrame = targetPosition
-		end
+	Callback = function()
+		local player = game.Players.LocalPlayer
+		local character = player.Character or player.CharacterAdded:Wait()
+		local hrp = character:WaitForChild("HumanoidRootPart")
+	
+		local targetPosition = CFrame.new(-3242, 1716, -2583)
+		
+		hrp.CFrame = targetPosition
 	end
 })
 
