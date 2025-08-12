@@ -1,7 +1,7 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-	Name = "Expedition Antartica by Fokus ID",
+	Name = "Mt Daun by Fokus ID",
 	Icon = 0,
 	LoadingTitle = "Mount Daun",
 	LoadingSubtitle = "by Fokus ID",
@@ -37,7 +37,7 @@ local Window = Rayfield:CreateWindow({
 local Tab = Window:CreateTab("Main")
 local Section = Tab:CreateSection("- 3xplo Yang Tersedia -")
 
-local Toggle = Tab:CreateToggle({
+local InfJump = Tab:CreateToggle({
 	Name = "Infinite Jump",
 	CurrentValue = false,
 	Flag = "Toggle1",
@@ -66,7 +66,7 @@ local Toggle = Tab:CreateToggle({
 	end
 })
 
-local Slider = Tab:CreateSlider({
+local Speed = Tab:CreateSlider({
 	Name = "Speed / Walkspeed",
 	Range = {0, 100},
 	Increment = 1,
@@ -85,7 +85,7 @@ local Slider = Tab:CreateSlider({
 })
 
 local Noclipping = nil
-local Clip = Tab:CreateSlider({
+local Clip = Tab:CreateToggle({
 	Name = "Clip",
 	CurrentValue = false,
 	Flag = "Toggle1",
@@ -115,10 +115,10 @@ local Clip = Tab:CreateSlider({
 	end
 })
 
-local Tab = Window:CreateTab("Teleport")
-local Section = Tab:CreateSection("- 3xplo Yang Tersedia -")
+local Tab2 = Window:CreateTab("Teleport")
+local Section2 = Tab2:CreateSection("- 3xplo Yang Tersedia -")
 
-local Toggle = Tab:CreateToggle({
+local TP = Tab2:CreateToggle({
 	Name = "Teleport to Camp 1",
 	CurrentValue = false,
 	Flag = "Toggle1",
@@ -135,7 +135,7 @@ local Toggle = Tab:CreateToggle({
 	end
 })
 
-local Toggle = Tab:CreateToggle({
+local TP2 = Tab2:CreateToggle({
 	Name = "Teleport to Camp 2",
 	CurrentValue = false,
 	Flag = "Toggle1",
@@ -152,7 +152,7 @@ local Toggle = Tab:CreateToggle({
 	end
 })
 
-local Toggle = Tab:CreateToggle({
+local TP3 = Tab2:CreateToggle({
 	Name = "Teleport to Camp 3",
 	CurrentValue = false,
 	Flag = "Toggle1",
@@ -169,7 +169,7 @@ local Toggle = Tab:CreateToggle({
 	end
 })
 
-local Toggle = Tab:CreateToggle({
+local TP4 = Tab2:CreateToggle({
 	Name = "Teleport to Camp 4",
 	CurrentValue = false,
 	Flag = "Toggle1",
@@ -186,7 +186,7 @@ local Toggle = Tab:CreateToggle({
 	end
 })
 
-local Toggle = Tab:CreateToggle({
+local Summit = Tab2:CreateToggle({
 	Name = "Teleport to Summit",
 	CurrentValue = false,
 	Flag = "Toggle1",
