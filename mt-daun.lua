@@ -385,7 +385,7 @@ local mobilefly = function(speaker, vfly)
 	end)
 end
 
-local fly = Tab.CreateToggle({
+local fly = Tab:CreateToggle({
 	Name = "Fly",
 	CurrentValue = FLYING,
 	Flag = "Toggle1",
