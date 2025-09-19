@@ -1,590 +1,865 @@
---[[====================================================
-    FokusID Ultimate Admin GUI (Executor)
-    Features:
-    - Player list (select target) + auto refresh & highlight
-    - Teleport to player / Bring to you / Kill / Freeze / Unfreeze / Set Health
-    - WalkSpeed / JumpPower set & reset (restore original)
-    - Fly (PC & Mobile) adapted from prior code
-    - RopeGun (RopeConstraint) + Unrope All + rope length slider
-    - NoClip toggle
-    - UI animations (selection pulse, evil effect, status spinner)
-    - Auto-refresh interval control
-    - Intended for executors (client-side powerful admin)
-======================================================]]
+-- Admin Panel untuk Executor (LocalScript)
+-- Fitur: player list (side panel, hide/show), teleport, bring, kill, rope, unrope all,
+-- walkspeed, jump power, reset to map defaults, fly, noclip, ESP, auto-refresh, auto-refresh toggle, animations optional.
 
--- ========== Services & Locals ==========
+-- CONFIG
+local UI_NAME = "AdminPanel"
+local REFRESH_INTERVAL = 5 -- detik untuk auto refresh list
+local DEFAULT_WALKSPEED = 16 -- fallback jika tidak ada map default
+local DEFAULT_JUMPPOWER = 50 -- fallback
+
+-- SERVICES
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local StarterGui = game:GetService("StarterGui")
+
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
--- Platform
-local IsOnMobile = table.find({Enum.Platform.Android, Enum.Platform.IOS}, UserInputService:GetPlatform()) ~= nil
+-- REMOTES (cek ketersediaan)
+local RopePlayer = nil
+local UnropeAll = nil
+local SendNotification = nil
+local AdminAction = nil
 
--- Helper constructors
-local function make(class, props)
-    local o = Instance.new(class)
-    if props then
-        for k,v in pairs(props) do
-            pcall(function() o[k] = v end)
+pcall(function()
+    RopePlayer = game:GetService("ReplicatedStorage"):WaitForChild("RopePlayer", 2)
+end)
+pcall(function()
+    UnropeAll = game:GetService("ReplicatedStorage"):WaitForChild("UnropeAll", 2)
+end)
+pcall(function()
+    SendNotification = game:GetService("ReplicatedStorage"):WaitForChild("SendNotification", 2)
+end)
+pcall(function()
+    AdminAction = game:GetService("ReplicatedStorage"):WaitForChild("AdminAction", 2)
+end)
+
+-- helper: safe fire remote
+local function safeFire(remote, ...)
+    if remote and remote.FireServer then
+        pcall(function() remote:FireServer(...) end)
+        return true
+    end
+    return false
+end
+
+-- store active ropes local (for fallback)
+local activeLocalRopes = {}
+
+-- store original defaults for reset
+local storedDefaults = {
+    WalkSpeed = LocalPlayer.Character and (LocalPlayer.Character:FindFirstChildOfClass("Humanoid") and LocalPlayer.Character:FindFirstChildOfClass("Humanoid").WalkSpeed) or DEFAULT_WALKSPEED,
+    JumpPower = LocalPlayer.Character and (LocalPlayer.Character:FindFirstChildOfClass("Humanoid") and LocalPlayer.Character:FindFirstChildOfClass("Humanoid").JumpPower) or DEFAULT_JUMPPOWER
+}
+
+-- try to read workspace.MapDefaults if exists
+pcall(function()
+    if workspace:FindFirstChild("MapDefaults") then
+        local md = workspace.MapDefaults
+        if md:FindFirstChild("WalkSpeed") and typeof(md.WalkSpeed.Value) == "number" then
+            storedDefaults.WalkSpeed = md.WalkSpeed.Value
+        end
+        if md:FindFirstChild("JumpPower") and typeof(md.JumpPower.Value) == "number" then
+            storedDefaults.JumpPower = md.JumpPower.Value
         end
     end
-    return o
-end
+end)
 
-local function getRoot(char)
-    if not char then return nil end
-    return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-end
+-- UI CREATION (ScreenGui)
+-- Remove existing UI if exists
+local existing = LocalPlayer:FindFirstChildOfClass("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild(UI_NAME)
+if existing then existing:Destroy() end
 
-local function safe(fn, ...)
-    local ok, res = pcall(fn, ...)
-    if ok then return res end
-    return nil
-end
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = UI_NAME
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
--- preserve originals
-local originalStats = {}
-local function recordOriginal(player)
-    if not player or not player.Character then return end
-    local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
-    if hum then
-        originalStats[player] = originalStats[player] or {}
-        originalStats[player].WalkSpeed = originalStats[player].WalkSpeed or hum.WalkSpeed
-        originalStats[player].JumpPower = originalStats[player].JumpPower or hum.JumpPower
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 420, 0, 480)
+mainFrame.Position = UDim2.new(0.02,0,0.2,0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+mainFrame.BorderSizePixel = 0
+mainFrame.AnchorPoint = Vector2.new(0,0)
+mainFrame.Parent = screenGui
+mainFrame.Visible = true
+mainFrame.Active = true
+
+local title = Instance.new("TextLabel", mainFrame)
+title.Size = UDim2.new(1,0,0,32)
+title.Position = UDim2.new(0,0,0,0)
+title.BackgroundTransparency = 1
+title.Text = "🔧 Aguz Admin Panel"
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
+title.TextColor3 = Color3.fromRGB(240,240,240)
+
+-- Hide / Drag
+local hideButton = Instance.new("TextButton", mainFrame)
+hideButton.Size = UDim2.new(0,90,0,28)
+hideButton.Position = UDim2.new(1,-95,0,2)
+hideButton.Text = "Hide Player List"
+hideButton.Font = Enum.Font.SourceSans
+hideButton.TextSize = 14
+hideButton.BackgroundColor3 = Color3.fromRGB(45,45,45)
+hideButton.TextColor3 = Color3.fromRGB(230,230,230)
+hideButton.BorderSizePixel = 0
+
+-- left: player list panel
+local leftPanel = Instance.new("Frame", mainFrame)
+leftPanel.Size = UDim2.new(0,160,1,-40)
+leftPanel.Position = UDim2.new(0,10,0,40)
+leftPanel.BackgroundTransparency = 0.05
+leftPanel.BorderSizePixel = 0
+
+local leftTitle = Instance.new("TextLabel", leftPanel)
+leftTitle.Size = UDim2.new(1, -10, 0, 24)
+leftTitle.Position = UDim2.new(0,6,0,6)
+leftTitle.BackgroundTransparency = 1
+leftTitle.Text = "Players"
+leftTitle.Font = Enum.Font.SourceSansBold
+leftTitle.TextSize = 14
+leftTitle.TextColor3 = Color3.fromRGB(240,240,240)
+
+local refreshButton = Instance.new("TextButton", leftPanel)
+refreshButton.Size = UDim2.new(0,70,0,22)
+refreshButton.Position = UDim2.new(1,-78,0,6)
+refreshButton.Text = "Refresh"
+refreshButton.Font = Enum.Font.SourceSans
+refreshButton.TextSize = 12
+refreshButton.BackgroundColor3 = Color3.fromRGB(60,60,60)
+refreshButton.TextColor3 = Color3.fromRGB(230,230,230)
+refreshButton.BorderSizePixel = 0
+
+local autoRefreshToggle = Instance.new("TextButton", leftPanel)
+autoRefreshToggle.Size = UDim2.new(1,-10,0,24)
+autoRefreshToggle.Position = UDim2.new(0,5,0,34)
+autoRefreshToggle.Text = "Auto Refresh: ON ("..tostring(REFRESH_INTERVAL).."s)"
+autoRefreshToggle.Font = Enum.Font.SourceSans
+autoRefreshToggle.TextSize = 12
+autoRefreshToggle.BackgroundColor3 = Color3.fromRGB(60,60,60)
+autoRefreshToggle.TextColor3 = Color3.fromRGB(230,230,230)
+autoRefreshToggle.BorderSizePixel = 0
+
+local playerList = Instance.new("ScrollingFrame", leftPanel)
+playerList.Size = UDim2.new(1,-10,1,-70)
+playerList.Position = UDim2.new(0,5,0,64)
+playerList.CanvasSize = UDim2.new(0,0,0,0)
+playerList.BackgroundTransparency = 1
+playerList.ScrollBarThickness = 6
+
+local uiListLayout = Instance.new("UIListLayout", playerList)
+uiListLayout.Padding = UDim.new(0,4)
+uiListLayout.SortOrder = Enum.SortOrder.Name
+
+-- right: controls panel
+local rightPanel = Instance.new("Frame", mainFrame)
+rightPanel.Size = UDim2.new(1,-190,1,-40)
+rightPanel.Position = UDim2.new(0,180,0,40)
+rightPanel.BackgroundTransparency = 0.05
+rightPanel.BorderSizePixel = 0
+
+local selectedLabel = Instance.new("TextLabel", rightPanel)
+selectedLabel.Size = UDim2.new(1, -10, 0, 28)
+selectedLabel.Position = UDim2.new(0,5,0,5)
+selectedLabel.BackgroundTransparency = 1
+selectedLabel.Text = "Selected: (None)"
+selectedLabel.Font = Enum.Font.SourceSansBold
+selectedLabel.TextSize = 14
+selectedLabel.TextColor3 = Color3.fromRGB(240,240,240)
+
+-- Buttons grid
+local buttonNames = {
+    {"Teleport To","Bring","Kill"},
+    {"Rope","Unrope All","Kill (Server)"},
+    {"Teleport (Server)","Bring (Server)","Unrope (Server)"},
+}
+local buttons = {}
+local startY = 40
+for rowIndex,row in ipairs(buttonNames) do
+    for colIndex, name in ipairs(row) do
+        local btn = Instance.new("TextButton", rightPanel)
+        btn.Size = UDim2.new(0,120,0,30)
+        btn.Position = UDim2.new(0, 10 + (colIndex-1)*135, 0, startY + (rowIndex-1)*38)
+        btn.Text = name
+        btn.Font = Enum.Font.SourceSans
+        btn.TextSize = 13
+        btn.BackgroundColor3 = Color3.fromRGB(70,70,70)
+        btn.TextColor3 = Color3.fromRGB(230,230,230)
+        btn.BorderSizePixel = 0
+        buttons[name] = btn
     end
 end
 
-Players.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function() wait(0.1) recordOriginal(p) end) end)
-for _,p in ipairs(Players:GetPlayers()) do if p.Character then recordOriginal(p) end end
+-- Walkspeed & Jump Power
+local wsLabel = Instance.new("TextLabel", rightPanel)
+wsLabel.Size = UDim2.new(0,200,0,22)
+wsLabel.Position = UDim2.new(0,8,0,200)
+wsLabel.BackgroundTransparency = 1
+wsLabel.Text = "WalkSpeed: "..tostring(storedDefaults.WalkSpeed)
+wsLabel.Font = Enum.Font.SourceSans
+wsLabel.TextSize = 13
+wsLabel.TextColor3 = Color3.fromRGB(230,230,230)
 
--- ========== Fly System (PC + Mobile) ==========
-local FLYING = false
-local iyflyspeed = 1
-local vehicleflyspeed = 1
-local QEfly = true
-local flyKeyDown, flyKeyUp
-local mobileConn = nil
-local velocityHandlerName = "FokusVel_"..math.random(1000,9999)
-local gyroHandlerName = "FokusGyr_"..math.random(1000,9999)
+local wsInput = Instance.new("TextBox", rightPanel)
+wsInput.Size = UDim2.new(0,120,0,26)
+wsInput.Position = UDim2.new(0,210,0,196)
+wsInput.Text = tostring(storedDefaults.WalkSpeed)
+wsInput.Font = Enum.Font.SourceSans
+wsInput.TextSize = 14
+wsInput.ClearTextOnFocus = false
+wsInput.BackgroundColor3 = Color3.fromRGB(55,55,55)
+wsInput.TextColor3 = Color3.fromRGB(230,230,230)
+wsInput.BorderSizePixel = 0
 
-local function sFLY(vfly)
-    repeat task.wait() until LocalPlayer and LocalPlayer.Character and getRoot(LocalPlayer.Character) and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    local T = getRoot(LocalPlayer.Character)
-    if not T then return end
+local wsSet = Instance.new("TextButton", rightPanel)
+wsSet.Size = UDim2.new(0,80,0,26)
+wsSet.Position = UDim2.new(0,340,0,196)
+wsSet.Text = "Set WS"
+wsSet.Font = Enum.Font.SourceSans
+wsSet.TextSize = 12
+wsSet.BackgroundColor3 = Color3.fromRGB(70,70,70)
+wsSet.TextColor3 = Color3.fromRGB(230,230,230)
+wsSet.BorderSizePixel = 0
 
-    if flyKeyDown then flyKeyDown:Disconnect() flyKeyDown = nil end
-    if flyKeyUp then flyKeyUp:Disconnect() flyKeyUp = nil end
+local jpLabel = Instance.new("TextLabel", rightPanel)
+jpLabel.Size = UDim2.new(0,200,0,22)
+jpLabel.Position = UDim2.new(0,8,0,230)
+jpLabel.BackgroundTransparency = 1
+jpLabel.Text = "JumpPower: "..tostring(storedDefaults.JumpPower)
+jpLabel.Font = Enum.Font.SourceSans
+jpLabel.TextSize = 13
+jpLabel.TextColor3 = Color3.fromRGB(230,230,230)
 
-    local CONTROL = {F=0,B=0,L=0,R=0,Q=0,E=0}
-    local SPEED = 0
+local jpInput = Instance.new("TextBox", rightPanel)
+jpInput.Size = UDim2.new(0,120,0,26)
+jpInput.Position = UDim2.new(0,210,0,226)
+jpInput.Text = tostring(storedDefaults.JumpPower)
+jpInput.Font = Enum.Font.SourceSans
+jpInput.TextSize = 14
+jpInput.ClearTextOnFocus = false
+jpInput.BackgroundColor3 = Color3.fromRGB(55,55,55)
+jpInput.TextColor3 = Color3.fromRGB(230,230,230)
+jpInput.BorderSizePixel = 0
 
-    local BG = Instance.new("BodyGyro", T)
-    local BV = Instance.new("BodyVelocity", T)
-    BG.P = 9e4; BG.MaxTorque = Vector3.new(9e9,9e9,9e9); BG.CFrame = T.CFrame
-    BV.MaxForce = Vector3.new(9e9,9e9,9e9); BV.Velocity = Vector3.new(0,0,0)
+local jpSet = Instance.new("TextButton", rightPanel)
+jpSet.Size = UDim2.new(0,80,0,26)
+jpSet.Position = UDim2.new(0,340,0,226)
+jpSet.Text = "Set JP"
+jpSet.Font = Enum.Font.SourceSans
+jpSet.TextSize = 12
+jpSet.BackgroundColor3 = Color3.fromRGB(70,70,70)
+jpSet.TextColor3 = Color3.fromRGB(230,230,230)
+jpSet.BorderSizePixel = 0
 
-    FLYING = true
+local resetDefaultsBtn = Instance.new("TextButton", rightPanel)
+resetDefaultsBtn.Size = UDim2.new(0,120,0,26)
+resetDefaultsBtn.Position = UDim2.new(0,8,0,262)
+resetDefaultsBtn.Text = "Reset to Map Default"
+resetDefaultsBtn.Font = Enum.Font.SourceSans
+resetDefaultsBtn.TextSize = 12
+resetDefaultsBtn.BackgroundColor3 = Color3.fromRGB(85,85,85)
+resetDefaultsBtn.TextColor3 = Color3.fromRGB(230,230,230)
+resetDefaultsBtn.BorderSizePixel = 0
 
-    spawn(function()
-        repeat
-            task.wait()
-            local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-            if humanoid and not vfly then humanoid.PlatformStand = true end
+-- Fly, Noclip, ESP toggles
+local flyToggle = Instance.new("TextButton", rightPanel)
+flyToggle.Size = UDim2.new(0,120,0,26)
+flyToggle.Position = UDim2.new(0,8,0,300)
+flyToggle.Text = "Fly: OFF"
+flyToggle.Font = Enum.Font.SourceSans
+flyToggle.TextSize = 12
+flyToggle.BackgroundColor3 = Color3.fromRGB(85,85,85)
+flyToggle.TextColor3 = Color3.fromRGB(230,230,230)
 
-            if (CONTROL.L + CONTROL.R) ~= 0 or (CONTROL.F + CONTROL.B) ~= 0 or (CONTROL.Q + CONTROL.E) ~= 0 then
-                SPEED = 50
-            else
-                SPEED = 0
+local noclipToggle = Instance.new("TextButton", rightPanel)
+noclipToggle.Size = UDim2.new(0,120,0,26)
+noclipToggle.Position = UDim2.new(0,140,0,300)
+noclipToggle.Text = "Noclip: OFF"
+noclipToggle.Font = Enum.Font.SourceSans
+noclipToggle.TextSize = 12
+noclipToggle.BackgroundColor3 = Color3.fromRGB(85,85,85)
+noclipToggle.TextColor3 = Color3.fromRGB(230,230,230)
+
+local espToggle = Instance.new("TextButton", rightPanel)
+espToggle.Size = UDim2.new(0,120,0,26)
+espToggle.Position = UDim2.new(0,272,0,300)
+espToggle.Text = "ESP: OFF"
+espToggle.Font = Enum.Font.SourceSans
+espToggle.TextSize = 12
+espToggle.BackgroundColor3 = Color3.fromRGB(85,85,85)
+espToggle.TextColor3 = Color3.fromRGB(230,230,230)
+
+-- FOOTER: small credits / close
+local closeBtn = Instance.new("TextButton", mainFrame)
+closeBtn.Size = UDim2.new(0,60,0,26)
+closeBtn.Position = UDim2.new(1,-66,1,-32)
+closeBtn.Text = "Close"
+closeBtn.Font = Enum.Font.SourceSans
+closeBtn.TextSize = 12
+closeBtn.BackgroundColor3 = Color3.fromRGB(90,40,40)
+closeBtn.TextColor3 = Color3.fromRGB(240,240,240)
+closeBtn.BorderSizePixel = 0
+
+-- DRAGGING mainFrame
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
             end
+        end)
+    end
+end)
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
 
-            if (CONTROL.L + CONTROL.R) ~= 0 or (CONTROL.F + CONTROL.B) ~= 0 or (CONTROL.Q + CONTROL.E) ~= 0 then
-                BV.Velocity = ((workspace.CurrentCamera.CFrame.LookVector * (CONTROL.F + CONTROL.B))
-                    + ((workspace.CurrentCamera.CFrame * CFrame.new(CONTROL.L + CONTROL.R, (CONTROL.F + CONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p)
-                    - workspace.CurrentCamera.CFrame.p)) * SPEED
-            else
-                BV.Velocity = Vector3.new(0,0,0)
-            end
+-- STATE
+local selectedPlayer = nil
+local autoRefresh = true
+local espEnabled = false
+local espItems = {}
+local flyEnabled = false
+local noclipEnabled = false
+local flyObjects = {}
+local humanoidWalkSpeedConnection = nil
+local noclipConnection = nil
 
-            BG.CFrame = workspace.CurrentCamera.CFrame
-        until not FLYING
-
-        BG:Destroy(); BV:Destroy()
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid") then
-            LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid").PlatformStand = false
-        end
-    end)
-
-    flyKeyDown = Mouse.KeyDown:Connect(function(k)
-        k = tostring(k):lower()
-        if k == "w" then CONTROL.F = (vfly and vehicleflyspeed or iyflyspeed)
-        elseif k == "s" then CONTROL.B = -(vfly and vehicleflyspeed or iyflyspeed)
-        elseif k == "a" then CONTROL.L = -(vfly and vehicleflyspeed or iyflyspeed)
-        elseif k == "d" then CONTROL.R = (vfly and vehicleflyspeed or iyflyspeed)
-        elseif QEfly and k == "e" then CONTROL.Q = (vfly and vehicleflyspeed or iyflyspeed)*2
-        elseif QEfly and k == "q" then CONTROL.E = -(vfly and vehicleflyspeed or iyflyspeed)*2 end
-    end)
-    flyKeyUp = Mouse.KeyUp:Connect(function(k)
-        k = tostring(k):lower()
-        if k == "w" then CONTROL.F = 0
-        elseif k == "s" then CONTROL.B = 0
-        elseif k == "a" then CONTROL.L = 0
-        elseif k == "d" then CONTROL.R = 0
-        elseif k == "e" then CONTROL.Q = 0
-        elseif k == "q" then CONTROL.E = 0 end
-    end)
-end
-
-local function NOFLY()
-    FLYING = false
-    if flyKeyDown then flyKeyDown:Disconnect() flyKeyDown = nil end
-    if flyKeyUp then flyKeyUp:Disconnect() flyKeyUp = nil end
-    if mobileConn then mobileConn:Disconnect(); mobileConn = nil end
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid") then
-        LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid").PlatformStand = false
+-- UTIL FUNCTIONS
+local function notify(text)
+    if SendNotification and SendNotification.FireServer then
+        pcall(function() SendNotification:FireServer(LocalPlayer, text) end)
+    else
+        -- fallback: small in-GUI tweened label
+        local tmp = Instance.new("TextLabel", mainFrame)
+        tmp.Size = UDim2.new(0.5,0,0,28)
+        tmp.Position = UDim2.new(0.25,0,1,-60)
+        tmp.BackgroundTransparency = 0.2
+        tmp.Text = text
+        tmp.Font = Enum.Font.SourceSans
+        tmp.TextSize = 14
+        tmp.TextColor3 = Color3.fromRGB(240,240,240)
+        tmp.BackgroundColor3 = Color3.fromRGB(60,60,60)
+        tmp.BorderSizePixel = 0
+        tmp.AnchorPoint = Vector2.new(0.5,0.5)
+        local tween = TweenService:Create(tmp, TweenInfo.new(1), {BackgroundTransparency = 1, TextTransparency = 0.5})
+        delay(2, function() pcall(function() tween:Play() end) end)
+        delay(4, function() pcall(function() tmp:Destroy() end) end)
     end
 end
 
-local function mobilefly(speaker, vfly)
-    -- simplified mobile fly: require ControlModule
-    local root = getRoot(speaker.Character)
-    if not root then return end
-    local ok, controlModule = pcall(function()
-        return require(speaker.PlayerScripts:WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
-    end)
-    if not ok or not controlModule then return end
-
-    local v3zero = Vector3.new(0,0,0)
-    local v3inf = Vector3.new(9e9,9e9,9e9)
-    local bv = Instance.new("BodyVelocity", root); bv.Name = velocityHandlerName; bv.MaxForce = v3zero; bv.Velocity = v3zero
-    local bg = Instance.new("BodyGyro", root); bg.Name = gyroHandlerName; bg.MaxTorque = v3inf; bg.P = 1000; bg.D = 50
-
-    if mobileConn then mobileConn:Disconnect() mobileConn = nil end
-    FLYING = true
-    mobileConn = RunService.RenderStepped:Connect(function()
-        root = getRoot(speaker.Character); if not root then return end
-        if not speaker.Character:FindFirstChildWhichIsA("Humanoid") then return end
-        local VH = root:FindFirstChild(velocityHandlerName); local GH = root:FindFirstChild(gyroHandlerName)
-        if not VH or not GH then return end
-        VH.MaxForce = v3inf; GH.MaxTorque = v3inf
-        if not vfly then speaker.Character:FindFirstChildWhichIsA("Humanoid").PlatformStand = true end
-        GH.CFrame = workspace.CurrentCamera.CFrame; VH.Velocity = Vector3.new()
-        local dir = controlModule:GetMoveVector()
-        if dir and dir.Magnitude > 0 then
-            VH.Velocity = VH.Velocity + workspace.CurrentCamera.CFrame.RightVector * (dir.X * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
-            VH.Velocity = VH.Velocity + workspace.CurrentCamera.CFrame.LookVector * (dir.Z * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
-        end
-    end)
+local function clearPlayerList()
+    for _, child in pairs(playerList:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
 end
 
--- ========== Rope System ==========
-local activeRopes = {} -- entries: {targetPlayer, a1, a2, rope}
-local defaultRopeLength = 12
+local function buildPlayerList()
+    clearPlayerList()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, -10, 0, 28)
+        btn.Text = plr.Name
+        btn.Font = Enum.Font.SourceSans
+        btn.TextSize = 14
+        btn.BackgroundColor3 = Color3.fromRGB(40,40,40)
+        btn.TextColor3 = Color3.fromRGB(230,230,230)
+        btn.BorderSizePixel = 0
+        btn.Parent = playerList
 
-local function clearRopes()
-    for _,t in ipairs(activeRopes) do
+        btn.MouseButton1Click:Connect(function()
+            selectedPlayer = plr
+            selectedLabel.Text = "Selected: "..plr.Name
+        end)
+    end
+    -- adjust canvas size
+    local count = #Players:GetPlayers()
+    playerList.CanvasSize = UDim2.new(0,0,0, (count*32) + 8)
+end
+
+-- auto-refresh loop
+spawn(function()
+    while true do
+        if autoRefresh then
+            pcall(buildPlayerList)
+        end
+        wait(REFRESH_INTERVAL)
+    end
+end)
+
+-- initial build
+buildPlayerList()
+
+-- hide/show left panel handler
+local leftVisible = true
+hideButton.MouseButton1Click:Connect(function()
+    leftVisible = not leftVisible
+    leftPanel.Visible = leftVisible
+    if leftVisible then
+        hideButton.Text = "Hide Player List"
+        mainFrame.Size = UDim2.new(0,420,0,480)
+    else
+        hideButton.Text = "Show Player List"
+        mainFrame.Size = UDim2.new(0,260,0,480)
+    end
+end)
+
+refreshButton.MouseButton1Click:Connect(function()
+    buildPlayerList()
+    notify("Player list refreshed")
+end)
+
+autoRefreshToggle.MouseButton1Click:Connect(function()
+    autoRefresh = not autoRefresh
+    autoRefreshToggle.Text = "Auto Refresh: "..(autoRefresh and "ON ("..tostring(REFRESH_INTERVAL).."s)" or "OFF")
+end)
+
+-- FEATURE IMPLEMENTATIONS
+
+-- Safe helper to get target character & root part
+local function getCharacterRoot(plr)
+    if not plr or not plr.Character then return nil end
+    local hrp = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Torso") or plr.Character:FindFirstChild("UpperTorso")
+    return plr.Character, hrp
+end
+
+-- Teleport local player to target (client-side)
+local function teleportTo(target)
+    if not target then notify("Pilih player dulu!") return end
+    local tchar, thrp = getCharacterRoot(target)
+    local myChar, myHrp = getCharacterRoot(LocalPlayer)
+    if tchar and thrp and myChar and myHrp then
         pcall(function()
-            if t.rope and t.rope.Parent then t.rope:Destroy() end
-            if t.a1 and t.a1.Parent then t.a1:Destroy() end
-            if t.a2 and t.a2.Parent then t.a2:Destroy() end
+            myHrp.CFrame = thrp.CFrame + Vector3.new(0,3,0)
         end)
+        notify("Teleport ke "..target.Name)
+    else
+        notify("Gagal teleport - karakter tidak ada")
     end
-    activeRopes = {}
 end
 
--- remove on death/respawn
-LocalPlayer.CharacterAdded:Connect(function() clearRopes() end)
--- give rope tool (executor context)
-local function giveRopeTool()
-    if LocalPlayer.Backpack:FindFirstChild("RopeGun") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("RopeGun")) then return end
-    local tool = Instance.new("Tool"); tool.Name = "RopeGun"; tool.RequiresHandle = false; tool.Parent = LocalPlayer.Backpack
-    tool.Activated:Connect(function()
-        local conn
-        conn = Mouse.Button1Down:Connect(function()
-            local tpart = Mouse.Target
-            if not tpart then return end
-            local model = tpart:FindFirstAncestorOfClass("Model")
-            local targetPlr = model and Players:GetPlayerFromCharacter(model)
-            if not targetPlr or targetPlr == LocalPlayer then return end
-            local root1 = getRoot(LocalPlayer.Character); local root2 = getRoot(targetPlr.Character)
-            if not root1 or not root2 then return end
-            local a1 = Instance.new("Attachment", root1); a1.Name = "Fokus_AttA_"..math.random(1,99999); a1.Position = Vector3.new(0,0.5,0)
-            local a2 = Instance.new("Attachment", root2); a2.Name = "Fokus_AttB_"..math.random(1,99999); a2.Position = Vector3.new(0,0.5,0)
-            local rope = Instance.new("RopeConstraint"); rope.Attachment0 = a1; rope.Attachment1 = a2; rope.Length = defaultRopeLength; rope.Visible = true; rope.Parent = workspace
-            table.insert(activeRopes, {targetPlayer = targetPlr, a1 = a1, a2 = a2, rope = rope})
-            StarterGui:SetCore("SendNotification", {Title="RopeGun", Text="Rope to "..targetPlr.Name.." created"})
-            conn:Disconnect()
+-- Bring target to local player (client-side)
+local function bringToMe(target)
+    if not target then notify("Pilih player dulu!") return end
+    local tchar, thrp = getCharacterRoot(target)
+    local myChar, myHrp = getCharacterRoot(LocalPlayer)
+    if tchar and thrp and myChar and myHrp then
+        pcall(function()
+            thrp.CFrame = myHrp.CFrame + Vector3.new(2,0,0)
         end)
-        delay(6, function() if conn and conn.Connected then conn:Disconnect() end end)
+        notify("Membawa "..target.Name.." ke kamu")
+    else
+        notify("Gagal membawa - karakter tidak ada")
+    end
+end
+
+-- Kill target (client-side attempt)
+local function killPlayerLocal(target)
+    if not target then notify("Pilih player dulu!") return end
+    local tchar = target.Character
+    if tchar then
+        local humanoid = tchar:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            pcall(function() humanoid.Health = 0 end)
+            notify("Dibunuh: "..target.Name)
+            return true
+        end
+    end
+    notify("Gagal kill local (mencoba server...)")
+    return false
+end
+
+-- Rope target (use remote if possible, fallback local)
+local function ropePlayer(target)
+    if not target then notify("Pilih player dulu!") return end
+    -- prefer remote
+    if RopePlayer and RopePlayer.FireServer then
+        pcall(function() RopePlayer:FireServer(LocalPlayer, target) end)
+        notify("Rope request dikirim ke server untuk "..target.Name)
+        return
+    end
+    -- fallback: create attachments + rope constraint locally on our HRP
+    local myChar, myHrp = getCharacterRoot(LocalPlayer)
+    local tchar, thrp = getCharacterRoot(target)
+    if myHrp and thrp then
+        local att1 = Instance.new("Attachment")
+        att1.Parent = myHrp
+        local att2 = Instance.new("Attachment")
+        att2.Parent = thrp
+        local rope = Instance.new("RopeConstraint")
+        rope.Attachment0 = att1
+        rope.Attachment1 = att2
+        rope.Length = 6
+        rope.Visible = true
+        rope.Parent = myHrp
+        table.insert(activeLocalRopes, rope)
+        notify("Rope lokal dibuat ke "..target.Name)
+    else
+        notify("Gagal rope - HRP tidak ditemukan")
+    end
+end
+
+local function unropeAll()
+    -- Try remote
+    if UnropeAll and UnropeAll.FireServer then
+        pcall(function() UnropeAll:FireServer(LocalPlayer) end)
+        notify("Unrope all dikirim ke server")
+    end
+    -- local cleanup
+    for _, r in ipairs(activeLocalRopes) do
+        pcall(function() if r and r.Parent then r:Destroy() end end)
+    end
+    activeLocalRopes = {}
+    notify("Semua tali lokal dihapus")
+end
+
+-- Server-side generic admin action (if AdminAction remote present)
+-- AdminAction:FireServer(action:string, targetPlayer:Player)
+local function fireAdminAction(action, target)
+    if not AdminAction then return false end
+    pcall(function()
+        if target then
+            AdminAction:FireServer(action, target)
+        else
+            AdminAction:FireServer(action)
+        end
     end)
+    return true
 end
 
--- change rope length for all active ropes
-local function setRopeLength(len)
-    for _,t in ipairs(activeRopes) do
-        pcall(function() if t.rope then t.rope.Length = len end end)
+-- ESP functions
+local function createESPForPlayer(plr)
+    if not plr.Character then return end
+    local root = plr.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    if espItems[plr] then return end
+
+    local bill = Instance.new("BillboardGui")
+    bill.Size = UDim2.new(0,100,0,40)
+    bill.AlwaysOnTop = true
+    bill.Adornee = root
+    bill.StudsOffset = Vector3.new(0,2,0)
+    bill.Parent = root
+
+    local text = Instance.new("TextLabel", bill)
+    text.Size = UDim2.new(1,0,1,0)
+    text.BackgroundTransparency = 1
+    text.Text = plr.Name
+    text.Font = Enum.Font.SourceSansBold
+    text.TextSize = 14
+    text.TextColor3 = Color3.fromRGB(255,255,255)
+    text.TextStrokeTransparency = 0.5
+
+    espItems[plr] = bill
+end
+
+local function removeESPForPlayer(plr)
+    if espItems[plr] then
+        pcall(function() espItems[plr]:Destroy() end)
+        espItems[plr] = nil
     end
 end
 
--- ========== NoClip ==========
-local clipEnabled = false
-local noclipConn = nil
-local function Clip(enable)
-    clipEnabled = enable
-    if enable then
-        if noclipConn then noclipConn:Disconnect() noclipConn = nil end
-        noclipConn = RunService.Stepped:Connect(function()
+local function toggleESP(on)
+    espEnabled = on
+    if espEnabled then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                createESPForPlayer(plr)
+            end
+        end
+        -- connect new players
+        Players.PlayerAdded:Connect(function(p)
+            if espEnabled and p ~= LocalPlayer then
+                p.CharacterAdded:Connect(function() createESPForPlayer(p) end)
+            end
+        end)
+        -- remove when left
+        Players.PlayerRemoving:Connect(function(p)
+            removeESPForPlayer(p)
+        end)
+        notify("ESP ON")
+    else
+        for p,_ in pairs(espItems) do removeESPForPlayer(p) end
+        espItems = {}
+        notify("ESP OFF")
+    end
+end
+
+-- Fly implementation (simple body movers)
+local function enableFly(on)
+    flyEnabled = on
+    local character, hrp = getCharacterRoot(LocalPlayer)
+    if not character or not hrp then notify("Karakter tidak ditemukan") return end
+
+    if flyEnabled then
+        -- create BodyVelocity + BodyGyro
+        local bv = Instance.new("BodyVelocity")
+        bv.MaxForce = Vector3.new(1e5,1e5,1e5)
+        bv.Velocity = Vector3.new(0,0,0)
+        bv.Parent = hrp
+
+        local bg = Instance.new("BodyGyro")
+        bg.MaxTorque = Vector3.new(1e5,1e5,1e5)
+        bg.CFrame = hrp.CFrame
+        bg.Parent = hrp
+
+        flyObjects.bv = bv
+        flyObjects.bg = bg
+
+        local speed = 50
+        local forward = 0
+        local right = 0
+        local up = 0
+
+        local function updateFly()
+            if not flyEnabled then return end
+            local cam = workspace.CurrentCamera
+            local dir = Vector3.new(0,0,0)
+            local camCFrame = cam.CFrame
+            dir = dir + (camCFrame.LookVector * forward)
+            dir = dir + (camCFrame.RightVector * right)
+            dir = dir + Vector3.new(0, up, 0)
+            if flyObjects.bv then
+                flyObjects.bv.Velocity = dir * speed
+            end
+            if flyObjects.bg then
+                flyObjects.bg.CFrame = CFrame.new(hrp.Position, hrp.Position + camCFrame.LookVector)
+            end
+        end
+
+        local conn
+        conn = RunService.RenderStepped:Connect(function()
+            if not flyEnabled then
+                conn:Disconnect()
+                return
+            end
+            updateFly()
+        end)
+
+        -- WASD + space/shift to control
+        local down = {}
+        UserInputService.InputBegan:Connect(function(i,gp)
+            if gp then return end
+            down[i.KeyCode] = true
+            if i.KeyCode == Enum.KeyCode.W then forward = 1 end
+            if i.KeyCode == Enum.KeyCode.S then forward = -1 end
+            if i.KeyCode == Enum.KeyCode.D then right = 1 end
+            if i.KeyCode == Enum.KeyCode.A then right = -1 end
+            if i.KeyCode == Enum.KeyCode.Space then up = 1 end
+            if i.KeyCode == Enum.KeyCode.LeftShift then up = -1 end
+        end)
+        UserInputService.InputEnded:Connect(function(i,gp)
+            if gp then return end
+            down[i.KeyCode] = nil
+            if i.KeyCode == Enum.KeyCode.W or i.KeyCode == Enum.KeyCode.S then forward = 0 end
+            if i.KeyCode == Enum.KeyCode.D or i.KeyCode == Enum.KeyCode.A then right = 0 end
+            if i.KeyCode == Enum.KeyCode.Space or i.KeyCode == Enum.KeyCode.LeftShift then up = 0 end
+        end)
+
+        notify("Fly ON (gunakan WASD + Space/Shift)")
+    else
+        if flyObjects.bv then pcall(function() flyObjects.bv:Destroy() end) end
+        if flyObjects.bg then pcall(function() flyObjects.bg:Destroy() end) end
+        flyObjects = {}
+        notify("Fly OFF")
+    end
+end
+
+-- Noclip implementation
+local function enableNoclip(on)
+    noclipEnabled = on
+    if noclipEnabled then
+        noclipConnection = RunService.Stepped:Connect(function()
             local char = LocalPlayer.Character
-            if not char then return end
-            for _,part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part.CanCollide == true then
-                    part.CanCollide = false
+            if char then
+                for _, part in pairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
                 end
             end
         end)
+        notify("Noclip ON")
     else
-        if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
-    end
-end
-
--- ========== Extra Admin Actions ==========
-local function freezePlayer(p)
-    if not p or not p.Character then return end
-    local r = getRoot(p.Character)
-    if r then r.Velocity = Vector3.new(0,0,0); r.Anchored = true end
-end
-local function unfreezePlayer(p)
-    if not p or not p.Character then return end
-    local r = getRoot(p.Character)
-    if r then r.Anchored = false end
-end
-local function killPlayer(p)
-    if not p or not p.Character then return end
-    local hum = p.Character:FindFirstChildWhichIsA("Humanoid")
-    if hum then pcall(function() hum.Health = 0 end) end
-end
-local function bringPlayerToMe(p)
-    if not p or not p.Character then return end
-    local r = getRoot(p.Character); local myr = getRoot(LocalPlayer.Character)
-    if r and myr then pcall(function() r.CFrame = myr.CFrame + Vector3.new(0,3,0) end) end
-end
-local function teleportToPlayer(p)
-    if not p or not p.Character then return end
-    local r = getRoot(p.Character); local myr = getRoot(LocalPlayer.Character)
-    if r and myr then pcall(function() myr.CFrame = r.CFrame + Vector3.new(0,3,0) end) end
-end
-local function setPlayerHealth(p, val)
-    if not p or not p.Character then return end
-    local hum = p.Character:FindFirstChildWhichIsA("Humanoid")
-    if hum then pcall(function() hum.Health = val end) end
-end
-
--- ========== UI: build & behaviors ==========
-local function buildUI()
-    local screen = Instance.new("ScreenGui")
-    screen.Name = "FokusUltimateAdmin"
-    screen.ResetOnSpawn = false
-    screen.Parent = LocalPlayer:WaitForChild("PlayerGui")
-    screen.IgnoreGuiInset = true
-
-    -- Top-right toggle
-    local topToggle = make("TextButton", {
-        Parent = screen, Size = UDim2.new(0,140,0,34), AnchorPoint = Vector2.new(1,0),
-        Position = UDim2.new(1, -10, 0, 10), Text = "Hide Admin GUI", BackgroundColor3 = Color3.fromRGB(35,35,35),
-        TextColor3 = Color3.new(1,1,1), Font = Enum.Font.SourceSans, TextSize = 16
-    })
-
-    -- Main panel
-    local panel = make("Frame", {
-        Parent = screen, Size = UDim2.new(0,480,0,480), Position = UDim2.new(0.05,0,0.08,0),
-        BackgroundColor3 = Color3.fromRGB(22,22,22), BorderSizePixel = 0
-    })
-
-    -- Status spinner (kevil animation)
-    local spinner = make("Frame", {
-        Parent = panel, Size = UDim2.new(0,26,0,26), Position = UDim2.new(0.01,0,0.02,0), BackgroundColor3 = Color3.fromRGB(0,0,0)
-    })
-    local spinIcon = make("TextLabel", {Parent = spinner, Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1, Text = "😈", TextScaled = true})
-    -- Tween spin continuously
-    spawn(function()
-        while spinner.Parent do
-            pcall(function()
-                spinIcon.Rotation = 0
-                TweenService:Create(spinIcon, TweenInfo.new(1.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut), {Rotation = 360}):Play()
-            end)
-            wait(1.2)
-        end
-    end)
-
-    -- Title
-    local title = make("TextLabel", {Parent = panel, Size = UDim2.new(0.72,0,0,34), Position = UDim2.new(0.05,40,0.02,0), BackgroundTransparency = 1, Text = "Fokus Ultimate Admin", Font = Enum.Font.SourceSansBold, TextSize = 20, TextColor3 = Color3.new(1,1,1)})
-
-    -- Left: controls stack
-    local leftY = 0.08
-    local function addLabel(txt, y)
-        return make("TextLabel", {Parent = panel, Size = UDim2.new(0.45,0,0,22), Position = UDim2.new(0.025,0,y,0), BackgroundTransparency = 1, Text = txt, TextColor3 = Color3.new(1,1,1), Font = Enum.Font.SourceSans, TextSize = 14})
-    end
-    local wsLabel = addLabel("WalkSpeed:", 0.12)
-    local wsBox = make("TextBox", {Parent = panel, Size = UDim2.new(0.2,0,0,30), Position = UDim2.new(0.025,0,0.16,0), PlaceholderText = "e.g. 20", BackgroundColor3 = Color3.fromRGB(45,45,45), TextColor3 = Color3.new(1,1,1)})
-    local jpLabel = addLabel("JumpPower:", 0.12 + 0.04)
-    local jpBox = make("TextBox", {Parent = panel, Size = UDim2.new(0.2,0,0,30), Position = UDim2.new(0.275,0,0.16,0), PlaceholderText = "e.g. 60", BackgroundColor3 = Color3.fromRGB(45,45,45), TextColor3 = Color3.new(1,1,1)})
-
-    local applyBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.45,0,0,32), Position = UDim2.new(0.025,0,0.24,0), Text = "Apply WS/JP", BackgroundColor3 = Color3.fromRGB(70,70,70), TextColor3 = Color3.new(1,1,1)})
-    local resetWSBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.215,0,0,28), Position = UDim2.new(0.025,0,0.295,0), Text = "Reset WS", BackgroundColor3 = Color3.fromRGB(60,60,60), TextColor3 = Color3.new(1,1,1)})
-    local resetJPBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.215,0,0,28), Position = UDim2.new(0.26,0,0.295,0), Text = "Reset JP", BackgroundColor3 = Color3.fromRGB(60,60,60), TextColor3 = Color3.new(1,1,1)})
-
-    -- Fly controls
-    local flyBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.45,0,0,34), Position = UDim2.new(0.025,0,0.355,0), Text = "Toggle Fly", BackgroundColor3 = Color3.fromRGB(85,85,85), TextColor3 = Color3.new(1,1,1)})
-
-    -- Rope controls and slider
-    local ropeLenLabel = make("TextLabel", {Parent = panel, Size = UDim2.new(0.45,0,0,20), Position = UDim2.new(0.025,0,0.425,0), BackgroundTransparency = 1, Text = "Rope Length:", TextColor3 = Color3.new(1,1,1)})
-    local ropeLenBox = make("TextBox", {Parent = panel, Size = UDim2.new(0.2,0,0,28), Position = UDim2.new(0.025,0,0.455,0), PlaceholderText = tostring(defaultRopeLength), BackgroundColor3 = Color3.fromRGB(45,45,45), TextColor3 = Color3.new(1,1,1)})
-    local giveRopeBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.2,0,0,30), Position = UDim2.new(0.26,0,0.455,0), Text = "Give Rope", BackgroundColor3 = Color3.fromRGB(85,85,85), TextColor3 = Color3.new(1,1,1)})
-    local unropeBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.45,0,0,30), Position = UDim2.new(0.025,0,0.505,0), Text = "Unrope All", BackgroundColor3 = Color3.fromRGB(140,60,60), TextColor3 = Color3.new(1,1,1)})
-
-    -- NoClip / Godmode
-    local clipBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.215,0,0,30), Position = UDim2.new(0.025,0,0.565,0), Text = "NoClip: OFF", BackgroundColor3 = Color3.fromRGB(80,40,40), TextColor3 = Color3.new(1,1,1)})
-    local godBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.215,0,0,30), Position = UDim2.new(0.26,0,0.565,0), Text = "God: OFF", BackgroundColor3 = Color3.fromRGB(80,40,40), TextColor3 = Color3.new(1,1,1)})
-    local godEnabled = false
-
-    local statusLabel = make("TextLabel", {Parent = panel, Size = UDim2.new(0.95,0,0,24), Position = UDim2.new(0.025,0,0.625,0), BackgroundTransparency = 1, Text = "Status: Ready", TextColor3 = Color3.new(1,1,1)})
-
-    -- Side player panel (list)
-    local side = make("Frame", {Parent = screen, Size = UDim2.new(0,240,0,480), Position = UDim2.new(0.55,0,0.08,0), BackgroundColor3 = Color3.fromRGB(24,24,24)})
-    local sideTitle = make("TextLabel", {Parent = side, Size = UDim2.new(1,0,0,34), Position = UDim2.new(0,0,0,0), Text = "Players", BackgroundColor3 = Color3.fromRGB(40,40,40), TextColor3 = Color3.new(1,1,1), Font = Enum.Font.SourceSansBold, TextSize = 16})
-    local listFrame = make("ScrollingFrame", {Parent = side, Size = UDim2.new(1,-10,0,380), Position = UDim2.new(0,5,0,40), CanvasSize = UDim2.new(0,0,0,0), ScrollBarThickness = 6, BackgroundTransparency = 1})
-    local listLayout = Instance.new("UIListLayout", listFrame); listLayout.Padding = UDim.new(0,4)
-    local selectedLabel = make("TextLabel", {Parent = side, Size = UDim2.new(1,0,0,32), Position = UDim2.new(0,0,0,428), Text = "Selected: (none)", BackgroundTransparency = 1, TextColor3 = Color3.new(1,1,1)})
-    local actionRow = make("Frame", {Parent = side, Size = UDim2.new(1,0,0,36), Position = UDim2.new(0,0,0,460), BackgroundTransparency = 1})
-    local tpBtn = make("TextButton", {Parent = actionRow, Size = UDim2.new(0.33, -6, 1, 0), Position = UDim2.new(0,3,0,0), Text = "Teleport →", BackgroundColor3 = Color3.fromRGB(60,120,60), TextColor3 = Color3.new(1,1,1)})
-    local killBtn = make("TextButton", {Parent = actionRow, Size = UDim2.new(0.33, -6, 1, 0), Position = UDim2.new(0.335,3,0,0), Text = "Kill", BackgroundColor3 = Color3.fromRGB(140,40,40), TextColor3 = Color3.new(1,1,1)})
-    local bringBtn = make("TextButton", {Parent = actionRow, Size = UDim2.new(0.33, -6, 1, 0), Position = UDim2.new(0.67,3,0,0), Text = "Bring", BackgroundColor3 = Color3.fromRGB(60,60,140), TextColor3 = Color3.new(1,1,1)})
-    local freezeBtn = make("TextButton", {Parent = side, Size = UDim2.new(1,0,0,30), Position = UDim2.new(0,0,0,420), Text = "Freeze / Unfreeze", BackgroundColor3 = Color3.fromRGB(100,60,60), TextColor3 = Color3.new(1,1,1)})
-
-    -- Extra controls row (set health)
-    local healthBox = make("TextBox", {Parent = panel, Size = UDim2.new(0.2,0,0,30), Position = UDim2.new(0.025,0,0.69,0), PlaceholderText = "Set Health", BackgroundColor3 = Color3.fromRGB(45,45,45), TextColor3 = Color3.new(1,1,1)})
-    local setHealthBtn = make("TextButton", {Parent = panel, Size = UDim2.new(0.2,0,0,30), Position = UDim2.new(0.26,0,0.69,0), Text = "Set Health", BackgroundColor3 = Color3.fromRGB(90,90,90), TextColor3 = Color3.new(1,1,1)})
-
-    local autoRefLabel = make("TextLabel", {Parent = panel, Size = UDim2.new(0.45,0,0,20), Position = UDim2.new(0.025,0,0.745,0), BackgroundTransparency = 1, Text = "Auto-refresh (sec):", TextColor3 = Color3.new(1,1,1)})
-    local autoRefBox = make("TextBox", {Parent = panel, Size = UDim2.new(0.2,0,0,28), Position = UDim2.new(0.025,0,0.78,0), PlaceholderText = "5", BackgroundColor3 = Color3.fromRGB(45,45,45), TextColor3 = Color3.new(1,1,1)})
-
-    -- Helper: play small "evil" effect on target (particle + brief spin)
-    local function playEvilEffectOnCharacter(char)
-        if not char then return end
-        local root = getRoot(char); if not root then return end
-        -- particle
-        local p = Instance.new("ParticleEmitter")
-        p.Texture = "rbxassetid://241594314" -- small smoke-ish (executor context)
-        p.Rate = 200; p.Lifetime = NumberRange.new(0.2,0.6); p.Speed = NumberRange.new(2,6)
-        p.Rotation = NumberRange.new(0,360); p.RotSpeed = NumberRange.new(-180,180)
-        p.Parent = root
-        delay(0.3, function() p.Enabled = false; wait(1); p:Destroy() end)
-        -- brief body angular spin
-        local bav = Instance.new("BodyAngularVelocity", root)
-        bav.MaxTorque = Vector3.new(9e9,9e9,9e9); bav.AngularVelocity = Vector3.new(0,8,0)
-        delay(0.6, function() if bav and bav.Parent then bav:Destroy() end end)
-    end
-
-    -- UI behaviors & functions
-    local playersButtons = {}
-    local selected = nil
-    local selectedTween = nil
-
-    local function updateSelectedLabel()
-        if selected and selected.Parent then
-            selectedLabel.Text = "Selected: " .. selected.Name
-        else
-            selected = nil
-            selectedLabel.Text = "Selected: (none)"
-        end
-    end
-
-    local function refreshPlayerList()
-        -- clear
-        for _,c in ipairs(listFrame:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
-        playersButtons = {}
-        for _,p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer then
-                local btn = make("TextButton", {Parent = listFrame, Size = UDim2.new(1, -8, 0, 28), BackgroundColor3 = Color3.fromRGB(55,55,55), Text = p.Name, TextColor3 = Color3.new(1,1,1), Font = Enum.Font.SourceSans})
-                btn.MouseButton1Click:Connect(function()
-                    -- selection animation: pulse & highlight
-                    selected = p
-                    updateSelectedLabel()
-                    for _,other in ipairs(listFrame:GetChildren()) do
-                        if other:IsA("TextButton") then
-                            TweenService:Create(other, TweenInfo.new(0.25), {BackgroundColor3 = Color3.fromRGB(55,55,55)}):Play()
-                        end
-                    end
-                    TweenService:Create(btn, TweenInfo.new(0.25), {BackgroundColor3 = Color3.fromRGB(90,40,120)}):Play()
-                    pcall(function()
-                        if selectedTween then selectedTween:Cancel(); selectedTween = nil end
-                    end)
-                    -- pulse
-                    selectedTween = TweenService:Create(btn, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {TextTransparency = 0.2})
-                    selectedTween:Play()
-                end)
+        if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end
+        -- try to restore collisions
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    pcall(function() part.CanCollide = true end)
+                end
             end
         end
-        -- adjust canvas
-        local total = 0
-        for _,c in ipairs(listFrame:GetChildren()) do if c:IsA("GuiObject") then total = total + c.AbsoluteSize.Y + 4 end end
-        listFrame.CanvasSize = UDim2.new(0,0,0, math.max(total,1))
-        updateSelectedLabel()
+        notify("Noclip OFF")
     end
-
-    -- Auto refresh
-    local autoRefreshInterval = 5
-    spawn(function()
-        while screen.Parent do
-            refreshPlayerList()
-            wait(autoRefreshInterval)
-        end
-    end)
-
-    -- Buttons wiring
-    applyBtn.MouseButton1Click:Connect(function()
-        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-        if hum then
-            local ws = tonumber(wsBox.Text); local jp = tonumber(jpBox.Text)
-            if ws then hum.WalkSpeed = ws end
-            if jp then hum.JumpPower = jp end
-            originalStats[LocalPlayer] = originalStats[LocalPlayer] or {}
-            originalStats[LocalPlayer].WalkSpeed = originalStats[LocalPlayer].WalkSpeed or hum.WalkSpeed
-            originalStats[LocalPlayer].JumpPower = originalStats[LocalPlayer].JumpPower or hum.JumpPower
-            statusLabel.Text = "Status: Applied WS/JP"
-        else statusLabel.Text = "Status: Humanoid not found" end
-    end)
-    resetWSBtn.MouseButton1Click:Connect(function()
-        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-        if hum and originalStats[LocalPlayer] and originalStats[LocalPlayer].WalkSpeed then
-            hum.WalkSpeed = originalStats[LocalPlayer].WalkSpeed
-        else if hum then hum.WalkSpeed = 16 end end
-        statusLabel.Text = "Status: WalkSpeed reset"
-    end)
-    resetJPBtn.MouseButton1Click:Connect(function()
-        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-        if hum and originalStats[LocalPlayer] and originalStats[LocalPlayer].JumpPower then
-            hum.JumpPower = originalStats[LocalPlayer].JumpPower
-        else if hum then hum.JumpPower = 50 end end
-        statusLabel.Text = "Status: JumpPower reset"
-    end)
-
-    flyBtn.MouseButton1Click:Connect(function()
-        if FLYING then NOFLY(); statusLabel.Text = "Status: Fly stopped" else
-            if IsOnMobile then mobilefly(LocalPlayer,false) else sFLY(false) end
-            statusLabel.Text = "Status: Fly started"
-        end
-    end)
-
-    giveRopeBtn.MouseButton1Click:Connect(function()
-        giveRopeTool()
-        statusLabel.Text = "Status: RopeGun given"
-    end)
-    unropeBtn.MouseButton1Click:Connect(function() clearRopes(); statusLabel.Text = "Status: All ropes removed" end)
-
-    clipBtn.MouseButton1Click:Connect(function()
-        Clip(not clipEnabled)
-        clipBtn.Text = clipEnabled and "NoClip: ON" or "NoClip: OFF"
-        clipBtn.BackgroundColor3 = clipEnabled and Color3.fromRGB(40,80,40) or Color3.fromRGB(80,40,40)
-    end)
-
-    godBtn.MouseButton1Click:Connect(function()
-        godEnabled = not godEnabled
-        godBtn.Text = godEnabled and "God: ON" or "God: OFF"
-        godBtn.BackgroundColor3 = godEnabled and Color3.fromRGB(40,80,40) or Color3.fromRGB(80,40,40)
-        if godEnabled then
-            -- naive godmode: set huge health and prevent health changes quickly
-            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                hum.MaxHealth = 1e9; hum.Health = hum.MaxHealth
-            end
-        else
-            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-            if hum and originalStats[LocalPlayer] then
-                hum.MaxHealth = 100; hum.Health = 100
-            end
-        end
-    end)
-
-    ropeLenBox.FocusLost:Connect(function(enter)
-        local v = tonumber(ropeLenBox.Text)
-        if v and v > 0 then defaultRopeLength = v; setRopeLength(v); statusLabel.Text = "Status: Rope length set to "..v end
-    end)
-
-    setHealthBtn.MouseButton1Click:Connect(function()
-        local v = tonumber(healthBox.Text)
-        if not v then statusLabel.Text = "Status: invalid health value"; return end
-        if selected and selected.Character then
-            setPlayerHealth(selected, v)
-            statusLabel.Text = "Status: Set "..selected.Name.."'s health to "..v
-            playEvilEffectOnCharacter(selected.Character)
-        else
-            statusLabel.Text = "Status: No target selected"
-        end
-    end)
-
-    tpBtn.MouseButton1Click:Connect(function()
-        if selected and selected.Character then
-            teleportToPlayer(selected)
-            statusLabel.Text = "Status: Teleported to "..selected.Name
-            playEvilEffectOnCharacter(LocalPlayer.Character)
-        else statusLabel.Text = "Status: No target selected" end
-    end)
-
-    killBtn.MouseButton1Click:Connect(function()
-        if selected and selected.Character then
-            killPlayer(selected)
-            statusLabel.Text = "Status: Killed "..selected.Name
-            playEvilEffectOnCharacter(selected.Character)
-        else statusLabel.Text = "Status: No target selected" end
-    end)
-
-    bringBtn.MouseButton1Click:Connect(function()
-        if selected and selected.Character then
-            bringPlayerToMe(selected)
-            statusLabel.Text = "Status: Brought "..selected.Name
-            playEvilEffectOnCharacter(selected.Character)
-        else statusLabel.Text = "Status: No target selected" end
-    end)
-
-    freezeBtn.MouseButton1Click:Connect(function()
-        if selected and selected.Character then
-            local root = getRoot(selected.Character)
-            if root and root.Anchored then
-                unfreezePlayer(selected); statusLabel.Text = "Status: Unfroze "..selected.Name
-            else freezePlayer(selected); statusLabel.Text = "Status: Froze "..selected.Name end
-        else statusLabel.Text = "Status: No target selected" end
-    end)
-
-    -- toggle show/hide
-    topToggle.MouseButton1Click:Connect(function()
-        local vis = not panel.Visible
-        panel.Visible = vis; side.Visible = vis
-        topToggle.Text = vis and "Hide Admin GUI" or "Show Admin GUI"
-    end)
-
-    -- auto-refresh interval box
-    autoRefBox.FocusLost:Connect(function()
-        local v = tonumber(autoRefBox.Text)
-        if v and v > 0 then autoRefreshInterval = v; statusLabel.Text = "Status: Auto-refresh set to "..v.."s" end
-    end)
-
-    -- initial populate & periodic refresh
-    refreshPlayerList()
-    spawn(function()
-        while screen.Parent do
-            refreshPlayerList()
-            wait(5)
-        end
-    end)
-
-    return screen
 end
 
--- create UI
-local gui = buildUI()
+-- WalkSpeed & JumpPower setters
+local function setWalkSpeed(value)
+    local char = LocalPlayer.Character
+    if not char then notify("Karakter tidak ditemukan") return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function() humanoid.WalkSpeed = value end)
+        notify("WalkSpeed diset ke "..tostring(value))
+    end
+end
+local function setJumpPower(value)
+    local char = LocalPlayer.Character
+    if not char then notify("Karakter tidak ditemukan") return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function() humanoid.JumpPower = value end)
+        notify("JumpPower diset ke "..tostring(value))
+    end
+end
+local function resetToMapDefaults()
+    setWalkSpeed(storedDefaults.WalkSpeed)
+    setJumpPower(storedDefaults.JumpPower)
+    wsInput.Text = tostring(storedDefaults.WalkSpeed)
+    jpInput.Text = tostring(storedDefaults.JumpPower)
+    wsLabel.Text = "WalkSpeed: "..tostring(storedDefaults.WalkSpeed)
+    jpLabel.Text = "JumpPower: "..tostring(storedDefaults.JumpPower)
+    notify("Reset ke default map: WS="..storedDefaults.WalkSpeed.." JP="..storedDefaults.JumpPower)
+end
 
--- End of Script
+-- BUTTONS behavior
+buttons["Teleport To"].MouseButton1Click:Connect(function()
+    if selectedPlayer then teleportTo(selectedPlayer) end
+end)
+buttons["Bring"].MouseButton1Click:Connect(function()
+    if selectedPlayer then bringToMe(selectedPlayer) end
+end)
+buttons["Kill"].MouseButton1Click:Connect(function()
+    if selectedPlayer then killPlayerLocal(selectedPlayer) end
+end)
+buttons["Rope"].MouseButton1Click:Connect(function()
+    if selectedPlayer then ropePlayer(selectedPlayer) end
+end)
+buttons["Unrope All"].MouseButton1Click:Connect(function()
+    unropeAll()
+end)
+
+-- server variants (try remote AdminAction names)
+buttons["Kill (Server)"].MouseButton1Click:Connect(function()
+    if not selectedPlayer then notify("Pilih player dulu!") return end
+    if fireAdminAction("Kill", selectedPlayer) then
+        notify("Permintaan kill dikirim ke server untuk "..selectedPlayer.Name)
+    else
+        notify("Server kill remote tidak tersedia")
+    end
+end)
+buttons["Teleport (Server)"].MouseButton1Click:Connect(function()
+    if not selectedPlayer then notify("Pilih player dulu!") return end
+    if fireAdminAction("TeleportTo", selectedPlayer) then
+        notify("Permintaan teleport dikirim ke server")
+    else
+        notify("Server teleport remote tidak tersedia")
+    end
+end)
+buttons["Bring (Server)"].MouseButton1Click:Connect(function()
+    if not selectedPlayer then notify("Pilih player dulu!") return end
+    if fireAdminAction("Bring", selectedPlayer) then
+        notify("Permintaan bring dikirim ke server")
+    else
+        notify("Server bring remote tidak tersedia")
+    end
+end)
+buttons["Unrope (Server)"].MouseButton1Click:Connect(function()
+    if not selectedPlayer then notify("Pilih player dulu!") return end
+    if fireAdminAction("Unrope", selectedPlayer) then
+        notify("Permintaan unrope dikirim ke server")
+    else
+        notify("Server unrope remote tidak tersedia")
+    end
+end)
+
+-- Walkspeed / JumpPower UI
+wsSet.MouseButton1Click:Connect(function()
+    local val = tonumber(wsInput.Text)
+    if val then
+        setWalkSpeed(val)
+        wsLabel.Text = "WalkSpeed: "..tostring(val)
+    else
+        notify("Nilai WalkSpeed invalid")
+    end
+end)
+jpSet.MouseButton1Click:Connect(function()
+    local val = tonumber(jpInput.Text)
+    if val then
+        setJumpPower(val)
+        jpLabel.Text = "JumpPower: "..tostring(val)
+    else
+        notify("Nilai JumpPower invalid")
+    end
+end)
+resetDefaultsBtn.MouseButton1Click:Connect(resetToMapDefaults)
+
+-- toggles
+flyToggle.MouseButton1Click:Connect(function()
+    enableFly(not flyEnabled)
+    flyToggle.Text = "Fly: "..(flyEnabled and "ON" or "OFF")
+end)
+noclipToggle.MouseButton1Click:Connect(function()
+    enableNoclip(not noclipEnabled)
+    noclipToggle.Text = "Noclip: "..(noclipEnabled and "ON" or "OFF")
+end)
+espToggle.MouseButton1Click:Connect(function()
+    toggleESP(not espEnabled)
+    espToggle.Text = "ESP: "..(espEnabled and "ON" or "OFF")
+end)
+
+-- Close button
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+-- Cleanup ESP on character removal etc.
+Players.PlayerRemoving:Connect(function(p)
+    removeESPForPlayer(p)
+end)
+Players.PlayerAdded:Connect(function(p)
+    if espEnabled then
+        p.CharacterAdded:Connect(function() createESPForPlayer(p) end)
+    end
+end)
+
+-- Auto-refresh selected label if selected player left
+Players.PlayerRemoving:Connect(function(p)
+    if selectedPlayer == p then
+        selectedPlayer = nil
+        selectedLabel.Text = "Selected: (None)"
+    end
+end)
+
+-- Attach to local character when character spawns (to reapply WS/JP if needed)
+LocalPlayer.CharacterAdded:Connect(function(char)
+    wait(0.5)
+    setWalkSpeed(tonumber(wsInput.Text) or storedDefaults.WalkSpeed)
+    setJumpPower(tonumber(jpInput.Text) or storedDefaults.JumpPower)
+end)
+
+-- Final notify
+notify("Admin Panel siap — pilih player dari daftar di kiri.")
+
+-- END OF SCRIPT
