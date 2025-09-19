@@ -351,3 +351,92 @@ clipBtn.MouseButton1Click:Connect(function()
         Clip(false)
     end
 end)
+
+--[[====================================================
+      ESP System
+======================================================]]
+local espEnabled = false
+local espFolder = Instance.new("Folder", workspace)
+espFolder.Name = "ESP_Objects"
+
+local function createESP(player)
+    if player == LocalPlayer then return end
+    if not player.Character then return end
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- BillboardGui
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESP_"..player.Name
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0,200,0,50)
+    billboard.StudsOffset = Vector3.new(0,3,0)
+    billboard.Parent = espFolder
+
+    local text = Instance.new("TextLabel", billboard)
+    text.Size = UDim2.new(1,0,1,0)
+    text.BackgroundTransparency = 1
+    text.TextColor3 = Color3.new(1,0,0)
+    text.TextStrokeTransparency = 0
+    text.Text = player.Name
+    text.Font = Enum.Font.SourceSansBold
+    text.TextScaled = true
+
+    billboard.Adornee = hrp
+end
+
+local function removeESP(player)
+    for _, obj in pairs(espFolder:GetChildren()) do
+        if obj.Name == "ESP_"..player.Name then
+            obj:Destroy()
+        end
+    end
+end
+
+local function toggleESP(state)
+    espEnabled = state
+    if state then
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                createESP(p)
+            end
+        end
+    else
+        espFolder:ClearAllChildren()
+    end
+end
+
+-- Auto refresh ESP saat ada player masuk/keluar
+Players.PlayerAdded:Connect(function(p)
+    if espEnabled then
+        p.CharacterAdded:Connect(function()
+            task.wait(1)
+            createESP(p)
+        end)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    removeESP(p)
+end)
+
+-- Tombol ESP
+local espBtn = Instance.new("TextButton", Frame)
+espBtn.Size = UDim2.new(1,-20,0,40)
+espBtn.Position = UDim2.new(0,10,0,160) -- taruh di bawah NoClip
+espBtn.Text = "ESP: OFF"
+espBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
+espBtn.TextColor3 = Color3.new(1,1,1)
+
+espBtn.MouseButton1Click:Connect(function()
+    espEnabled = not espEnabled
+    if espEnabled then
+        espBtn.Text = "ESP: ON"
+        espBtn.BackgroundColor3 = Color3.fromRGB(40,80,40)
+        toggleESP(true)
+    else
+        espBtn.Text = "ESP: OFF"
+        espBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
+        toggleESP(false)
+    end
+end)
