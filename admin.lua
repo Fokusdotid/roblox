@@ -227,36 +227,69 @@ end
 
 -- ESP
 local ESPEnabled = false
+local espFolder = Instance.new("Folder", workspace)
+espFolder.Name = "ESP_Objects"
+
 local function createESP(player)
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESP_Highlight"
-    highlight.FillColor = Color3.fromRGB(255, 0, 0)
-    highlight.FillTransparency = 0.5
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.Parent = player.Character
+    if player == LocalPlayer then return end
+    if not player.Character then return end
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- BillboardGui
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESP_"..player.Name
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0,200,0,50)
+    billboard.StudsOffset = Vector3.new(0,3,0)
+    billboard.Parent = espFolder
+
+    local text = Instance.new("TextLabel", billboard)
+    text.Size = UDim2.new(1,0,1,0)
+    text.BackgroundTransparency = 1
+    text.TextColor3 = Color3.new(1,0,0)
+    text.TextStrokeTransparency = 0
+    text.Text = player.Name
+    text.Font = Enum.Font.SourceSansBold
+    text.TextScaled = true
+
+    billboard.Adornee = hrp
 end
 
 local function removeESP(player)
-    if player.Character and player.Character:FindFirstChild("ESP_Highlight") then
-        player.Character:FindFirstChild("ESP_Highlight"):Destroy()
-    end
-end
-
-local function toggleESP()
-    ESPEnabled = not ESPEnabled
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            if ESPEnabled then
-                if plr.Character then createESP(plr) end
-                plr.CharacterAdded:Connect(function()
-                    if ESPEnabled then createESP(plr) end
-                end)
-            else
-                removeESP(plr)
-            end
+    for _, obj in pairs(espFolder:GetChildren()) do
+        if obj.Name == "ESP_"..player.Name then
+            obj:Destroy()
         end
     end
 end
+
+local function toggleESP(state)
+    ESPEnabled = state
+    if state then
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                createESP(p)
+            end
+        end
+    else
+        espFolder:ClearAllChildren()
+    end
+end
+
+-- Auto refresh ESP saat ada player masuk/keluar
+Players.PlayerAdded:Connect(function(p)
+    if ESPEnabled then
+        p.CharacterAdded:Connect(function()
+            task.wait(1)
+            createESP(p)
+        end)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    removeESP(p)
+end)
 
 --[[====================================================
       GUI
@@ -388,11 +421,12 @@ espBtn.MouseButton1Click:Connect(function()
     if ESPEnabled then
         espBtn.Text = "ESP: ON"
         espBtn.BackgroundColor3 = Color3.fromRGB(40,80,40)
+        toggleESP(true)
     else
         espBtn.Text = "ESP: OFF"
         espBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
+        toggleESP(false)
     end
-    toggleESP()
 end)
 
 flyToggleBtn.MouseButton1Click:Connect(function()
