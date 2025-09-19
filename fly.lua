@@ -1,5 +1,6 @@
 --[[====================================================
-      Fly + NoClip GUI (PC & Mobile) by FokusID
+      Fly + NoClip + ESP GUI (PC & Mobile)
+      Versi: Full Pack
 ======================================================]]
 
 -- Helper
@@ -192,19 +193,12 @@ local function mobilefly(speaker, vfly)
             VelocityHandler.Velocity = v3none
 
             local direction = controlModule:GetMoveVector()
-            -- ✅ Fix maju/mundur ketuker
-            if direction.X > 0 then
-				VelocityHandler.Velocity = VelocityHandler.Velocity + camera.CFrame.RightVector * (direction.X * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
-			end
-			if direction.X < 0 then
-				VelocityHandler.Velocity = VelocityHandler.Velocity + camera.CFrame.RightVector * (direction.X * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
-			end
-			if direction.Z > 0 then
-				VelocityHandler.Velocity = VelocityHandler.Velocity - camera.CFrame.LookVector * (direction.Z * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
-			end
-			if direction.Z < 0 then
-				VelocityHandler.Velocity = VelocityHandler.Velocity - camera.CFrame.LookVector * (direction.Z * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
-			end
+            if direction.X ~= 0 then
+                VelocityHandler.Velocity = VelocityHandler.Velocity + camera.CFrame.RightVector * (direction.X * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
+            end
+            if direction.Z ~= 0 then
+                VelocityHandler.Velocity = VelocityHandler.Velocity - camera.CFrame.LookVector * (direction.Z * ((vfly and vehicleflyspeed or iyflyspeed) * 50))
+            end
         end
     end)
 end
@@ -231,131 +225,8 @@ local function Clip(value)
     end
 end
 
---[[====================================================
-      GUI
-======================================================]]
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.ResetOnSpawn = false
-
--- Toggle Button (pojok kanan atas)
-local toggleBtn = Instance.new("TextButton", ScreenGui)
-toggleBtn.Size = UDim2.new(0,100,0,30)
-toggleBtn.AnchorPoint = Vector2.new(1,0)
-toggleBtn.Position = UDim2.new(1,-10,0,10)
-toggleBtn.Text = "Hide Fly GUI"
-toggleBtn.BackgroundColor3 = Color3.fromRGB(40,40,40)
-toggleBtn.TextColor3 = Color3.new(1,1,1)
-
--- Frame utama
-local Frame = Instance.new("Frame", ScreenGui)
-Frame.Size = UDim2.new(0,200,0,160)
-Frame.Position = UDim2.new(0.7,0,0.15,0)
-Frame.BackgroundColor3 = Color3.fromRGB(30,30,30)
-Frame.BorderSizePixel = 0
-
--- Tombol Fly
-local flyBtn = Instance.new("TextButton", Frame)
-flyBtn.Size = UDim2.new(1,-20,0,40)
-flyBtn.Position = UDim2.new(0,10,0,10)
-flyBtn.Text = "Fly Toggle"
-flyBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
-flyBtn.TextColor3 = Color3.new(1,1,1)
-
--- Input Speed
-local speedBox = Instance.new("TextBox", Frame)
-speedBox.Size = UDim2.new(1,-20,0,40)
-speedBox.Position = UDim2.new(0,10,0,60)
-speedBox.PlaceholderText = "Speed (default 1)"
-speedBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-speedBox.TextColor3 = Color3.new(1,1,1)
-
--- Tombol NoClip
-local clipBtn = Instance.new("TextButton", Frame)
-clipBtn.Size = UDim2.new(1,-20,0,40)
-clipBtn.Position = UDim2.new(0,10,0,110)
-clipBtn.Text = "NoClip: OFF"
-clipBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
-clipBtn.TextColor3 = Color3.new(1,1,1)
-
--- Hide/Show logic
-local visible = true
-toggleBtn.MouseButton1Click:Connect(function()
-    visible = not visible
-    Frame.Visible = visible
-    toggleBtn.Text = visible and "Hide Fly GUI" or "Show Fly GUI"
-end)
-
--- Drag logic
-local UIS = game:GetService("UserInputService")
-local dragging, dragStart, startPos
-
-Frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = Frame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
-end)
-
-UIS.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-
---[[====================================================
-      Fly Button Action
-======================================================]]
-flyBtn.MouseButton1Click:Connect(function()
-    if FLYING then
-        if IsOnMobile then
-            unmobilefly(LocalPlayer)
-        else
-            NOFLY()
-        end
-    else
-        local val = tonumber(speedBox.Text)
-        if val and val > 0 then
-            iyflyspeed = val
-        else
-            iyflyspeed = 1
-        end
-        if IsOnMobile then
-            mobilefly(LocalPlayer, false)
-        else
-            sFLY(false)
-        end
-    end
-end)
-
---[[====================================================
-      NoClip Button Action
-======================================================]]
-clipBtn.MouseButton1Click:Connect(function()
-    clipEnabled = not clipEnabled
-    if clipEnabled then
-        clipBtn.Text = "NoClip: ON"
-        clipBtn.BackgroundColor3 = Color3.fromRGB(40,80,40)
-        Clip(true)
-    else
-        clipBtn.Text = "NoClip: OFF"
-        clipBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
-        Clip(false)
-    end
-end)
-
---[[====================================================
-      ESP System
-======================================================]]
-local espEnabled = false
+-- ESP
+local ESPEnabled = false
 local espFolder = Instance.new("Folder", workspace)
 espFolder.Name = "ESP_Objects"
 
@@ -394,7 +265,7 @@ local function removeESP(player)
 end
 
 local function toggleESP(state)
-    espEnabled = state
+    ESPEnabled = state
     if state then
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= LocalPlayer then
@@ -408,7 +279,7 @@ end
 
 -- Auto refresh ESP saat ada player masuk/keluar
 Players.PlayerAdded:Connect(function(p)
-    if espEnabled then
+    if ESPEnabled then
         p.CharacterAdded:Connect(function()
             task.wait(1)
             createESP(p)
@@ -420,17 +291,134 @@ Players.PlayerRemoving:Connect(function(p)
     removeESP(p)
 end)
 
--- Tombol ESP
-local espBtn = Instance.new("TextButton", Frame)
+--[[====================================================
+      GUI
+======================================================]]
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ResetOnSpawn = false
+
+-- Toggle Button (pojok kanan atas)
+local toggleBtn = Instance.new("TextButton", ScreenGui)
+toggleBtn.Size = UDim2.new(0,100,0,30)
+toggleBtn.AnchorPoint = Vector2.new(1,0)
+toggleBtn.Position = UDim2.new(1,-10,0,10)
+toggleBtn.Text = "Hide GUI"
+toggleBtn.BackgroundColor3 = Color3.fromRGB(40,40,40)
+toggleBtn.TextColor3 = Color3.new(1,1,1)
+
+-- FRAME UTAMA
+local MainFrame = Instance.new("Frame",ScreenGui)
+MainFrame.Size = UDim2.new(0,200,0,0)
+MainFrame.Position = UDim2.new(0.7,0,0.15,0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+MainFrame.BorderSizePixel = 0
+MainFrame.AutomaticSize = Enum.AutomaticSize.Y
+MainFrame.Visible = true
+
+local layout1 = Instance.new("UIListLayout",MainFrame)
+layout1.Padding = UDim.new(0,10)
+layout1.FillDirection = Enum.FillDirection.Vertical
+layout1.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout1.SortOrder = Enum.SortOrder.LayoutOrder
+local padding1 = Instance.new("UIPadding",MainFrame)
+padding1.PaddingTop = UDim.new(0,10)
+padding1.PaddingBottom = UDim.new(0,10)
+padding1.PaddingLeft = UDim.new(0,10)
+padding1.PaddingRight = UDim.new(0,10)
+
+-- FRAME FLY
+local FlyFrame = Instance.new("Frame",ScreenGui)
+FlyFrame.Size = UDim2.new(0,200,0,0)
+FlyFrame.Position = UDim2.new(0.7,0,0.15,0)
+FlyFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+FlyFrame.BorderSizePixel = 0
+FlyFrame.AutomaticSize = Enum.AutomaticSize.Y
+FlyFrame.Visible = false
+
+local layout2 = Instance.new("UIListLayout",FlyFrame)
+layout2.Padding = UDim.new(0,10)
+layout2.FillDirection = Enum.FillDirection.Vertical
+layout2.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout2.SortOrder = Enum.SortOrder.LayoutOrder
+local padding2 = Instance.new("UIPadding",FlyFrame)
+padding2.PaddingTop = UDim.new(0,10)
+padding2.PaddingBottom = UDim.new(0,10)
+padding2.PaddingLeft = UDim.new(0,10)
+padding2.PaddingRight = UDim.new(0,10)
+
+-- BUTTONS MAIN
+local flyMenuBtn = Instance.new("TextButton",MainFrame)
+flyMenuBtn.Size = UDim2.new(1,-20,0,40)
+flyMenuBtn.Text = "Fly Settings"
+flyMenuBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+flyMenuBtn.TextColor3 = Color3.new(1,1,1)
+
+local clipBtn = Instance.new("TextButton",MainFrame)
+clipBtn.Size = UDim2.new(1,-20,0,40)
+clipBtn.Text = "NoClip: OFF"
+clipBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
+clipBtn.TextColor3 = Color3.new(1,1,1)
+
+local espBtn = Instance.new("TextButton",MainFrame)
 espBtn.Size = UDim2.new(1,-20,0,40)
-espBtn.Position = UDim2.new(0,10,0,160) -- taruh di bawah NoClip
 espBtn.Text = "ESP: OFF"
 espBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
 espBtn.TextColor3 = Color3.new(1,1,1)
 
+-- BUTTONS FLYFRAME
+local backBtn = Instance.new("TextButton",FlyFrame)
+backBtn.Size = UDim2.new(1,-20,0,40)
+backBtn.Text = "< Back"
+backBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+backBtn.TextColor3 = Color3.new(1,1,1)
+
+local flyToggleBtn = Instance.new("TextButton",FlyFrame)
+flyToggleBtn.Size = UDim2.new(1,-20,0,40)
+flyToggleBtn.Text = "Fly: OFF"
+flyToggleBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
+flyToggleBtn.TextColor3 = Color3.new(1,1,1)
+
+local flySpeedBox = Instance.new("TextBox",FlyFrame)
+flySpeedBox.Size = UDim2.new(1,-20,0,40)
+flySpeedBox.PlaceholderText = "Speed (default 1)"
+flySpeedBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+flySpeedBox.TextColor3 = Color3.new(1,1,1)
+
+-- LOGIC
+toggleBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+    FlyFrame.Visible = false
+    toggleBtn.Text = MainFrame.Visible and "Hide GUI" or "Show GUI"
+end)
+
+flyMenuBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    FlyFrame.Visible = true
+end)
+
+backBtn.MouseButton1Click:Connect(function()
+    FlyFrame.Visible = false
+    MainFrame.Visible = true
+end)
+
+clipBtn.MouseButton1Click:Connect(function()
+    clipEnabled = not clipEnabled
+    if clipEnabled then
+        clipBtn.Text = "NoClip: ON"
+        clipBtn.BackgroundColor3 = Color3.fromRGB(40,80,40)
+        Clip(true)
+    else
+        clipBtn.Text = "NoClip: OFF"
+        clipBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
+        Clip(false)
+    end
+end)
+
 espBtn.MouseButton1Click:Connect(function()
-    espEnabled = not espEnabled
-    if espEnabled then
+    ESPEnabled = not ESPEnabled
+    if ESPEnabled then
         espBtn.Text = "ESP: ON"
         espBtn.BackgroundColor3 = Color3.fromRGB(40,80,40)
         toggleESP(true)
@@ -438,5 +426,19 @@ espBtn.MouseButton1Click:Connect(function()
         espBtn.Text = "ESP: OFF"
         espBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
         toggleESP(false)
+    end
+end)
+
+flyToggleBtn.MouseButton1Click:Connect(function()
+    if FLYING then
+        if IsOnMobile then unmobilefly(LocalPlayer) else NOFLY() end
+        flyToggleBtn.Text = "Fly: OFF"
+        flyToggleBtn.BackgroundColor3 = Color3.fromRGB(80,40,40)
+    else
+        local val = tonumber(flySpeedBox.Text)
+        if val and val > 0 then iyflyspeed = val else iyflyspeed = 1 end
+        if IsOnMobile then mobilefly(LocalPlayer,false) else sFLY(false) end
+        flyToggleBtn.Text = "Fly: ON"
+        flyToggleBtn.BackgroundColor3 = Color3.fromRGB(40,80,40)
     end
 end)
